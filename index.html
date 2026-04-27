@@ -416,9 +416,34 @@ window.addEventListener('resize', resize);
 // =============== AUDIO ===============
 const audio = (() => {
   let actx;
-  const init = () => { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); };
+  let unlocked = false;
+  const init = () => {
+    if (!actx) {
+      try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+  };
+  // Must be called from a user gesture handler (touchstart/click/keydown).
+  // iOS Safari refuses to play audio until this runs in the context of a real touch event.
+  const unlock = () => {
+    init();
+    if (!actx) return;
+    if (actx.state === 'suspended') actx.resume();
+    if (!unlocked) {
+      // Play a 1-sample silent buffer — the official iOS unlock trick
+      try {
+        const buf = actx.createBuffer(1, 1, 22050);
+        const src = actx.createBufferSource();
+        src.buffer = buf;
+        src.connect(actx.destination);
+        src.start(0);
+        unlocked = true;
+      } catch (e) {}
+    }
+  };
   const tone = (freq, dur, type='sine', vol=0.08, when=0) => {
     init();
+    if (!actx) return;
+    if (actx.state === 'suspended') actx.resume();
     const t0 = actx.currentTime + when;
     const osc = actx.createOscillator();
     const g = actx.createGain();
@@ -430,6 +455,7 @@ const audio = (() => {
     osc.start(t0); osc.stop(t0 + dur);
   };
   return {
+    unlock,
     shoot: () => tone(720, 0.04, 'square', 0.018),
     hit:   () => tone(180, 0.06, 'square', 0.04),
     kill:  () => { tone(120, 0.12, 'sawtooth', 0.05); tone(220, 0.08, 'square', 0.03, 0.02); },
@@ -544,6 +570,7 @@ const startGame = () => {
 };
 window.addEventListener('keydown', e => {
   if (e.target && e.target.tagName === 'INPUT') return;
+  audio.unlock();
   keys[e.key.toLowerCase()] = true;
   if (!state.started) startGame();
 });
@@ -553,6 +580,7 @@ window.addEventListener('keyup', e => {
 });
 window.addEventListener('click', (e) => {
   if (e.target && e.target.tagName === 'INPUT') return;
+  audio.unlock();
   if (!state.started) startGame();
 });
 
@@ -564,6 +592,7 @@ function getCanvasPos(t) {
 canvas.addEventListener('touchstart', e => {
   if (e.target && e.target.tagName === 'INPUT') return;
   e.preventDefault();
+  audio.unlock();
   if (!state.started) startGame();
   if (joy.active) return;
   const t = e.changedTouches[0];
